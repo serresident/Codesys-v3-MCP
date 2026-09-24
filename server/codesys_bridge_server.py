@@ -220,9 +220,28 @@ def action_map_io(req):
     proj.save()
     return {"status": "ok", "mapped": results}
 
+def find_or_create_folder_path(root_node, path_parts):
+    current = root_node
+    for part in path_parts:
+        if not part:
+            continue
+        found = None
+        for child in current.get_children(False):
+            if child.get_name() == part:
+                found = child
+                break
+        if not found:
+            try:
+                found = current.create_folder(part)
+            except Exception:
+                found = None
+        if found:
+            current = found
+    return current
+
 def action_export(req):
     """
-    Экспорт всех объектов ST из Application.
+    Экспорт всех объектов ST из Application и генерация PLCopen XML.
     """
     proj = projects.primary
     if not proj:
@@ -244,19 +263,65 @@ def action_export(req):
             impl = c.textual_implementation.text if hasattr(c, "textual_implementation") and c.textual_implementation else ""
             
             if decl or impl:
+                guid_str = str(c.guid) if hasattr(c, "guid") else ""
                 exported[curr_path] = {
                     "declaration": decl,
                     "implementation": impl,
-                    "type": str(c.type)
+                    "type": str(c.type),
+                    "guid": guid_str
                 }
             recurse(c, curr_path)
 
     recurse(app)
-    return {"status": "ok", "count": len(exported), "objects": exported}
+
+    # Автоматическая генерация PLCopen XML
+    xml_str = None
+    try:
+        xml_str = proj.export_xml([app], recursive=True, export_folder_structure=True, declarations_as_plaintext=True)
+    except Exception as ex:
+        print("Warning exporting XML: %s" % ex)
+
+    # Если передан sources_path (например, при локальном вызове через IPC), сохраняем файлы прямо на диск
+    sources_path = req.get("sources_path")
+    if sources_path and os.path.exists(sources_path):
+        try:
+            if xml_str:
+                xml_file = os.path.join(sources_path, "project_sources.xml")
+                with io.open(xml_file, "w", encoding="utf-8") as f:
+                    f.write(unicode(xml_str))
+                if req.get("add_context", False):
+                    ctx_dir = os.path.join(sources_path, ".context")
+                    if not os.path.exists(ctx_dir):
+                        os.makedirs(ctx_dir)
+                    with io.open(os.path.join(ctx_dir, "project_sources.xml"), "w", encoding="utf-8") as f:
+                        f.write(unicode(xml_str))
+            for rel_path, data in exported.items():
+                fpath = os.path.join(sources_path, rel_path.replace("/", os.sep) + ".st")
+                fdir = os.path.dirname(fpath)
+                if not os.path.exists(fdir):
+                    os.makedirs(fdir)
+                with io.open(fpath, "w", encoding="utf-8") as f:
+                    if data.get("guid"):
+                        f.write(unicode("// @OBJECT_ID: " + data["guid"] + "\n"))
+                    if data.get("declaration"):
+                        f.write(unicode("// @DECLARATION\n" + data["declaration"] + "\n\n"))
+                    if data.get("implementation"):
+                        f.write(unicode("// @IMPLEMENTATION\n" + data["implementation"] + "\n"))
+        except Exception as ex:
+            print("Warning saving files to sources_path: %s" % ex)
+
+    res = {
+        "status": "ok",
+        "count": len(exported),
+        "objects": exported
+    }
+    if xml_str:
+        res["xml"] = xml_str
+    return res
 
 def action_import(req):
     """
-    Пакетный импорт файлов в проект.
+    Пакетный импорт файлов в проект с поддержкой создания новых объектов и структуры папок.
     """
     proj = projects.primary
     if not proj:
@@ -270,21 +335,97 @@ def action_import(req):
     files = req.get("files", {})
     results = {}
 
+    guid_to_obj = {}
+    try:
+        for obj in proj.get_children(True):
+            if hasattr(obj, "guid"):
+                guid_to_obj[str(obj.guid)] = obj
+    except Exception:
+        pass
+
     for rel_path, data in files.items():
-        name = rel_path.split("/")[-1].replace(".st", "").replace(".prg", "").replace(".dut", "").replace(".gvl", "").replace(".fb", "").replace(".func", "")
+        clean_rel = rel_path.replace("\\", "/")
+        parts = clean_rel.split("/")
+        filename = parts[-1]
+        parent_parts = parts[:-1]
+
+        ext = None
+        for possible_ext in ['.prg.st', '.fb.st', '.func.st', '.method.st', '.action.st', '.property.st', '.gvl.st', '.dut.st', '.st']:
+            if filename.lower().endswith(possible_ext):
+                ext = possible_ext
+                break
+        
+        obj_name = filename[:-len(ext)] if ext else filename
+        if "." in obj_name:
+            obj_name = obj_name.split(".")[0]
+
         decl = data.get("declaration", "")
         impl = data.get("implementation", "")
+        guid = data.get("guid")
 
-        found = app.find(name, True)
-        if found:
-            obj = found[0]
+        obj = None
+        if guid and guid in guid_to_obj:
+            obj = guid_to_obj[guid]
+        if not obj:
+            found = app.find(obj_name, True)
+            if found:
+                obj = found[0]
+
+        if obj:
             if decl and hasattr(obj, "textual_declaration") and obj.textual_declaration:
                 obj.textual_declaration.replace(decl)
             if impl and hasattr(obj, "textual_implementation") and obj.textual_implementation:
                 obj.textual_implementation.replace(impl)
-            results[name] = "Updated"
+            results[obj_name] = "Updated"
         else:
-            results[name] = "Not found (new creation requires container path)"
+            try:
+                if len(parent_parts) > 0 and parent_parts[-1] == obj_name:
+                    parent_parts = parent_parts[:-1]
+
+                if ext in ['.method.st', '.action.st', '.property.st'] and len(parent_parts) > 0:
+                    parent_pou_name = parent_parts[-1]
+                    parent_folder_parts = parent_parts[:-1]
+                    parent_container = find_or_create_folder_path(app, parent_folder_parts)
+                    parent_pou = None
+                    for ch in parent_container.get_children(False):
+                        if ch.get_name() == parent_pou_name:
+                            parent_pou = ch
+                            break
+                    if parent_pou:
+                        if ext == '.method.st':
+                            new_obj = parent_pou.create_method(obj_name)
+                        elif ext == '.property.st':
+                            new_obj = parent_pou.create_property(obj_name, 'BOOL')
+                        elif ext == '.action.st' and hasattr(parent_pou, 'create_action'):
+                            new_obj = parent_pou.create_action(obj_name)
+                        else:
+                            new_obj = None
+                    else:
+                        new_obj = None
+                else:
+                    parent_container = find_or_create_folder_path(app, parent_parts)
+                    decl_upper = decl.upper()
+                    if ext == '.fb.st' or 'FUNCTION_BLOCK' in decl_upper:
+                        new_obj = parent_container.create_pou(obj_name, script_engine.PouType.FunctionBlock)
+                    elif ext == '.func.st' or 'FUNCTION ' in decl_upper:
+                        new_obj = parent_container.create_pou(obj_name, script_engine.PouType.Function)
+                    elif ext == '.gvl.st' or 'VAR_GLOBAL' in decl_upper:
+                        new_obj = parent_container.create_gvl(obj_name)
+                    elif ext == '.dut.st' or 'TYPE' in decl_upper:
+                        new_obj = parent_container.create_dut(obj_name)
+                    else:
+                        new_obj = parent_container.create_pou(obj_name, script_engine.PouType.Program)
+
+                if new_obj:
+                    if decl and hasattr(new_obj, "textual_declaration") and new_obj.textual_declaration:
+                        new_obj.textual_declaration.replace(decl)
+                    if impl and hasattr(new_obj, "textual_implementation") and new_obj.textual_implementation:
+                        new_obj.textual_implementation.replace(impl)
+                    results[obj_name] = "Created"
+                else:
+                    results[obj_name] = "Failed to create"
+            except Exception as create_ex:
+                results[obj_name] = "Error creating: " + str(create_ex)
 
     proj.save()
     return {"status": "ok", "results": results}
@@ -660,7 +801,10 @@ def process_ipc_file():
         File.Delete(IPC_REQ_FILE)
         req = json.loads(text)
         resp = dispatch_request(req)
-        File.WriteAllText(IPC_RESP_FILE, json.dumps(resp, ensure_ascii=False), System.Text.Encoding.UTF8)
+        resp_json = json.dumps(resp, ensure_ascii=False)
+        File.WriteAllText(IPC_RESP_FILE, resp_json, System.Text.Encoding.UTF8)
+        alt_resp = os.path.join(System.IO.Path.GetTempPath(), "codesys_ipc_res.json")
+        File.WriteAllText(alt_resp, resp_json, System.Text.Encoding.UTF8)
     except Exception as ex:
         print("IPC File Error: %s" % ex)
 

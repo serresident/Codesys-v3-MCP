@@ -35,6 +35,7 @@ except ImportError:
 temp_dir = tempfile.gettempdir()
 req_path = os.path.join(temp_dir, "codesys_ipc_req.json")
 res_path = os.path.join(temp_dir, "codesys_ipc_res.json")
+alt_res_path = os.path.join(temp_dir, "codesys_ipc_resp.json")
 log_path = os.path.join(temp_dir, "codesys_ipc.log")
 
 # --- QSS Dark Cyberpunk Theme Stylesheet ---
@@ -397,6 +398,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_launch_ide.clicked.connect(self.launch_ide_only)
         h_ctrl_ide.addWidget(self.btn_launch_ide)
 
+        self.btn_login = QtWidgets.QPushButton("🔌 Онлайн (Login)")
+        self.btn_login.setObjectName("btn_browse")
+        self.btn_login.clicked.connect(self.action_online_login)
+        h_ctrl_ide.addWidget(self.btn_login)
+
         self.btn_save_proj = QtWidgets.QPushButton("💾 Сохранить")
         self.btn_save_proj.setObjectName("btn_browse")
         self.btn_save_proj.clicked.connect(self.action_save_project)
@@ -415,7 +421,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_add_context.setStyleSheet("font-weight: normal; color: #e3e3e6;")
         actions_layout.addWidget(self.chk_add_context)
 
-        self.btn_export = QtWidgets.QPushButton("⬇ Быстрый экспорт исходников")
+        self.btn_export = QtWidgets.QPushButton("⬇ Быстрый экспорт (ST + XML)")
         self.btn_export.setObjectName("btn_action_sync")
         self.btn_export.clicked.connect(lambda: self.run_action("export"))
         actions_layout.addWidget(self.btn_export)
@@ -424,6 +430,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_import.setObjectName("btn_action_sync")
         self.btn_import.clicked.connect(lambda: self.run_action("import"))
         actions_layout.addWidget(self.btn_import)
+
+        h_xml = QtWidgets.QHBoxLayout()
+        self.btn_export_xml = QtWidgets.QPushButton("📦 Экспорт XML")
+        self.btn_export_xml.setObjectName("btn_browse")
+        self.btn_export_xml.clicked.connect(self.action_export_xml)
+        h_xml.addWidget(self.btn_export_xml)
+
+        self.btn_import_xml = QtWidgets.QPushButton("📥 Импорт XML")
+        self.btn_import_xml.setObjectName("btn_browse")
+        self.btn_import_xml.clicked.connect(self.action_import_xml)
+        h_xml.addWidget(self.btn_import_xml)
+        actions_layout.addLayout(h_xml)
 
         h_compiles = QtWidgets.QHBoxLayout()
         self.btn_compile = QtWidgets.QPushButton("🔨 Сборка (Build)")
@@ -651,12 +669,39 @@ class MainWindow(QtWidgets.QMainWindow):
     def set_buttons_enabled(self, enabled):
         self.btn_export.setEnabled(enabled)
         self.btn_import.setEnabled(enabled)
+        self.btn_export_xml.setEnabled(enabled)
+        self.btn_import_xml.setEnabled(enabled)
+        self.btn_login.setEnabled(enabled)
         self.btn_compile.setEnabled(enabled)
         self.btn_clean_compile.setEnabled(enabled)
         self.btn_tree.setEnabled(enabled)
         self.btn_git_commit.setEnabled(enabled)
         self.btn_git_push.setEnabled(enabled)
         self.btn_git_pull.setEnabled(enabled)
+
+    def action_online_login(self):
+        self.tabs.setCurrentIndex(0)
+        self.write_log("\n<span style='color:#00f0ff; font-weight:bold;'>=== 🔌 ПОДКЛЮЧЕНИЕ К ПЛК (ONLINE LOGIN) ===</span>")
+        self.run_action("online_login")
+
+    def action_export_xml(self):
+        self.tabs.setCurrentIndex(0)
+        self.write_log("\n<span style='color:#00f0ff; font-weight:bold;'>=== 📦 ЭКСПОРТ PLCOPEN XML ===</span>")
+        self.run_action("export_xml")
+
+    def action_import_xml(self):
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Выберите файл PLCopen XML для импорта", self.txt_sources_path.text(), "PLCopen XML (*.xml);;All Files (*)"
+        )
+        if file_path:
+            self.tabs.setCurrentIndex(0)
+            self.write_log(f"\n<span style='color:#00f0ff; font-weight:bold;'>=== 📥 ИМПОРТ PLCOPEN XML: {file_path} ===</span>")
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    xml_content = f.read()
+                self.run_action("import_xml", code=xml_content)
+            except Exception as e:
+                self.write_log(f"<span style='color:#ef4444;'>Ошибка чтения XML: {e}</span>")
 
     def resolve_project_path(self, provided):
         if os.path.isdir(provided):
@@ -819,11 +864,15 @@ if devs:
         self.write_log(f"\n<span style='color:#00f0ff; font-weight:bold;'>=== 🌐 СЕТЕВАЯ ОПЕРАЦИЯ: {action.upper()} ({host}:{port}) ===</span>")
         self.set_buttons_enabled(False)
 
-        req_data = {"action": action}
+        req_data = {"action": action, "add_context": self.chk_add_context.isChecked()}
         if action == "compile":
             req_data["clean"] = clean
         elif action == "exec":
             req_data["code"] = code
+        elif action == "import_xml":
+            req_data["xml"] = code
+        elif action == "online_login":
+            req_data["change_option"] = "Try"
         elif action == "import":
             files_data = {}
             for st_file in glob.glob(os.path.join(src_dir, "**", "*.st"), recursive=True):
@@ -831,13 +880,20 @@ if devs:
                 with open(st_file, "r", encoding="utf-8") as f:
                     content = f.read()
                 decl, impl = "", ""
+                guid = None
+                for line in content.splitlines():
+                    if line.startswith("// @OBJECT_ID:"):
+                        guid = line.split(":", 1)[1].strip()
+                        break
                 if "// @IMPLEMENTATION" in content:
                     parts = content.split("// @IMPLEMENTATION")
-                    decl = parts[0].replace("// @DECLARATION", "").strip()
+                    decl_raw = parts[0].replace("// @DECLARATION", "").strip()
+                    decl = "\n".join([l for l in decl_raw.splitlines() if not l.startswith("// @OBJECT_ID:")]).strip()
                     impl = parts[1].strip()
                 else:
-                    decl = content.strip()
-                files_data[rel] = {"declaration": decl, "implementation": impl}
+                    decl_raw = content.strip()
+                    decl = "\n".join([l for l in decl_raw.splitlines() if not l.startswith("// @OBJECT_ID:")]).strip()
+                files_data[rel] = {"declaration": decl, "implementation": impl, "guid": guid}
             req_data["files"] = files_data
             self.write_log(f"Подготовлено {len(files_data)} файлов для передачи в среду...")
 
@@ -854,21 +910,72 @@ if devs:
                 objs = res.get("objects", {})
                 count = 0
                 os.makedirs(src_dir, exist_ok=True)
+
+                # Сохранение project_sources.xml
+                xml_content = res.get("xml")
+                if xml_content:
+                    xml_file = os.path.join(src_dir, "project_sources.xml")
+                    try:
+                        with open(xml_file, "w", encoding="utf-8") as f:
+                            f.write(xml_content)
+                        self.write_log(f"<span style='color:#10b981;'>✓ Сохранен PLCopen XML: {xml_file}</span>")
+                    except Exception as ex:
+                        self.write_log(f"<span style='color:#ef4444;'>Ошибка сохранения XML: {ex}</span>")
+
+                    if self.chk_add_context.isChecked():
+                        ctx_dir = os.path.join(src_dir, ".context")
+                        os.makedirs(ctx_dir, exist_ok=True)
+                        try:
+                            with open(os.path.join(ctx_dir, "project_sources.xml"), "w", encoding="utf-8") as f:
+                                f.write(xml_content)
+                            self.write_log(f"<span style='color:#06b6d4;'>✓ Скопирован в контекст: {os.path.join(ctx_dir, 'project_sources.xml')}</span>")
+                        except Exception as ex:
+                            pass
+
                 for rel_path, data in objs.items():
                     file_path = os.path.join(src_dir, rel_path.replace("/", os.sep) + ".st")
                     os.makedirs(os.path.dirname(file_path), exist_ok=True)
                     with open(file_path, "w", encoding="utf-8") as f:
+                        if data.get("guid"):
+                            f.write(f"// @OBJECT_ID: {data['guid']}\n")
                         decl = data.get("declaration", "").strip()
                         impl = data.get("implementation", "").strip()
                         if decl: f.write("// @DECLARATION\n" + decl + "\n\n")
                         if impl: f.write("// @IMPLEMENTATION\n" + impl + "\n")
                     count += 1
-                self.write_log(f"\n<span style='color:#10b981; font-weight:bold;'>=== УСПЕШНО ЭКСПОРТИРОВАНО {count} ОБЪЕКТОВ В {src_dir} ===</span>")
+                self.write_log(f"\n<span style='color:#10b981; font-weight:bold;'>=== УСПЕШНО ЭКСПОРТИРОВАНО {count} ОБЪЕКТОВ И PLCOPEN XML В {src_dir} ===</span>")
+
+            elif action == "export_xml":
+                xml_content = res.get("xml")
+                if xml_content:
+                    os.makedirs(src_dir, exist_ok=True)
+                    xml_file = os.path.join(src_dir, "project_sources.xml")
+                    with open(xml_file, "w", encoding="utf-8") as f:
+                        f.write(xml_content)
+                    self.write_log(f"\n<span style='color:#10b981; font-weight:bold;'>=== PLCOPEN XML УСПЕШНО СОХРАНЕН: {xml_file} ===</span>")
+                    if self.chk_add_context.isChecked():
+                        ctx_dir = os.path.join(src_dir, ".context")
+                        os.makedirs(ctx_dir, exist_ok=True)
+                        with open(os.path.join(ctx_dir, "project_sources.xml"), "w", encoding="utf-8") as f:
+                            f.write(xml_content)
+                        self.write_log(f"<span style='color:#06b6d4;'>✓ Скопирован в контекст: {os.path.join(ctx_dir, 'project_sources.xml')}</span>")
+                else:
+                    self.write_log("<span style='color:#ef4444;'>XML не получен от сервера</span>")
+
+            elif action == "import_xml":
+                self.write_log("\n<span style='color:#10b981; font-weight:bold;'>=== PLCOPEN XML УСПЕШНО ИМПОРТИРОВАН В ПРОЕКТ ===</span>")
+                self.write_log("<span style='color:#f59e0b;'>Подсказка: закройте и откройте дерево проекта в Abak.IDE для обновления.</span>")
+
+            elif action == "online_login":
+                is_logged = res.get("is_logged_in", False)
+                state = res.get("application_state", "unknown")
+                col = "#10b981" if is_logged else "#ef4444"
+                self.write_log(f"\n<span style='color:{col}; font-weight:bold;'>=== ОНЛАЙН СТАТУС: Logged In={is_logged}, State={state} ===</span>")
 
             elif action == "import":
                 results = res.get("results", {})
                 for name, st in results.items():
-                    col = "#10b981" if "Updated" in st else "#f59e0b"
+                    col = "#10b981" if ("Updated" in st or "Created" in st) else "#f59e0b"
                     self.write_log(f"  - <span style='color:{col};'>{name}: {st}</span>")
                 self.write_log(f"\n<span style='color:#10b981; font-weight:bold;'>=== ИМПОРТ ЗАВЕРШЕН, ПРОЕКТ СОХРАНЕН ===</span>")
                 self.write_log("<span style='color:#f59e0b;'>Подсказка: если вкладки были открыты в Abak.IDE, закройте их и откройте заново из дерева.</span>")
@@ -901,6 +1008,9 @@ if devs:
         self.write_log(f"\n<span style='color:#00f0ff; font-weight:bold;'>=== 💻 ЛОКАЛЬНАЯ IPC ОПЕРАЦИЯ: {action.upper()} ===</span>")
         if os.path.exists(res_path):
             try: os.remove(res_path)
+            except: pass
+        if os.path.exists(alt_res_path):
+            try: os.remove(alt_res_path)
             except: pass
         if os.path.exists(log_path):
             try: os.remove(log_path)
@@ -939,14 +1049,15 @@ if devs:
             except Exception:
                 pass
 
-        if os.path.exists(res_path):
+        target_res = res_path if os.path.exists(res_path) else (alt_res_path if os.path.exists(alt_res_path) else None)
+        if target_res:
             self.poll_timer.stop()
             time.sleep(0.1)
             try:
-                with open(res_path, "r", encoding="utf-8") as f:
+                with open(target_res, "r", encoding="utf-8") as f:
                     res = json.load(f)
-                success = res.get("success", False)
-                error = res.get("error", "")
+                success = res.get("success", False) or res.get("status") == "ok"
+                error = res.get("error", res.get("message", ""))
                 if success:
                     self.write_log("\n<span style='color:#10b981; font-weight:bold;'>=== IPC ОПЕРАЦИЯ ВЫПОЛНЕНА УСПЕШНО ===</span>")
                 else:
@@ -955,6 +1066,8 @@ if devs:
                 self.write_log(f"\n<span style='color:#ef4444; font-weight:bold;'>=== ОШИБКА ЧТЕНИЯ ОТВЕТА IPC: {e} ===</span>")
             finally:
                 try: os.remove(res_path)
+                except: pass
+                try: os.remove(alt_res_path)
                 except: pass
                 try: os.remove(log_path)
                 except: pass
