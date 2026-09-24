@@ -550,7 +550,82 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.tabs.addTab(self.tab_git, "🌿 Git Версионирование")
 
-        # Tab 3: Help Section
+        # Tab 3: Script Runner (Выполнение произвольных скриптов)
+        self.tab_scripts = QtWidgets.QWidget()
+        lay_tab_scripts = QtWidgets.QVBoxLayout(self.tab_scripts)
+        lay_tab_scripts.setContentsMargins(10, 10, 10, 10)
+        lay_tab_scripts.setSpacing(8)
+
+        # Панель инструментов запуска скрипта
+        lay_script_tb = QtWidgets.QHBoxLayout()
+        lay_script_tb.addWidget(QtWidgets.QLabel("Шаблоны:"))
+        self.combo_script_templates = QtWidgets.QComboBox()
+        self.combo_script_templates.addItems([
+            "--- Выберите шаблон ---",
+            "1. Информация о проекте (Project Info)",
+            "2. Дерево объектов Application",
+            "3. Список оборудования (Device Tree)",
+            "4. Онлайн статус контроллера (Online Status)",
+            "5. Пользовательский расчет и возврат JSON (result = ...)"
+        ])
+        self.combo_script_templates.currentIndexChanged.connect(self.on_script_template_selected)
+        lay_script_tb.addWidget(self.combo_script_templates)
+
+        self.btn_load_script = QtWidgets.QPushButton("📂 Открыть .py")
+        self.btn_load_script.setObjectName("btn_browse")
+        self.btn_load_script.clicked.connect(self.load_script_file)
+        lay_script_tb.addWidget(self.btn_load_script)
+
+        self.btn_save_script = QtWidgets.QPushButton("💾 Сохранить .py")
+        self.btn_save_script.setObjectName("btn_browse")
+        self.btn_save_script.clicked.connect(self.save_script_file)
+        lay_script_tb.addWidget(self.btn_save_script)
+
+        lay_script_tb.addStretch()
+
+        self.btn_run_script_tab = QtWidgets.QPushButton("▶ Запустить скрипт в CODESYS")
+        self.btn_run_script_tab.setObjectName("btn_action_compile")
+        self.btn_run_script_tab.clicked.connect(self.run_editor_script)
+        lay_script_tb.addWidget(self.btn_run_script_tab)
+        lay_tab_scripts.addLayout(lay_script_tb)
+
+        # Разделитель: Редактор кода / Вывод исполнения
+        script_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        
+        script_edit_panel = QtWidgets.QWidget()
+        lay_edit_panel = QtWidgets.QVBoxLayout(script_edit_panel)
+        lay_edit_panel.setContentsMargins(0, 0, 0, 0)
+        lay_edit_panel.addWidget(QtWidgets.QLabel("Код скрипта (IronPython 2.7 / ScriptEngine):"))
+        self.txt_script_editor = QtWidgets.QTextEdit()
+        self.txt_script_editor.setPlaceholderText("# Введите произвольный код IronPython 2.7 или выберите шаблон выше\n# В скоупе доступны: projects, system, online, active_project, params, args\n# Присвойте результат в переменную 'result = {...}', чтобы вернуть структурированный JSON!\nprint(projects.primary.get_name() if projects.primary else 'No project')")
+        lay_edit_panel.addWidget(self.txt_script_editor)
+        script_splitter.addWidget(script_edit_panel)
+
+        script_out_panel = QtWidgets.QWidget()
+        lay_out_panel = QtWidgets.QVBoxLayout(script_out_panel)
+        lay_out_panel.setContentsMargins(0, 0, 0, 0)
+        
+        h_out_title = QtWidgets.QHBoxLayout()
+        h_out_title.addWidget(QtWidgets.QLabel("Вывод скрипта (Stdout / Stderr / Result):"))
+        btn_clear_script_out = QtWidgets.QPushButton("Очистить")
+        btn_clear_script_out.setFixedWidth(80)
+        btn_clear_script_out.setObjectName("btn_browse")
+        btn_clear_script_out.clicked.connect(lambda: self.txt_script_output.clear())
+        h_out_title.addWidget(btn_clear_script_out)
+        h_out_title.addStretch()
+        lay_out_panel.addLayout(h_out_title)
+
+        self.txt_script_output = QtWidgets.QTextBrowser()
+        lay_out_panel.addWidget(self.txt_script_output)
+        script_splitter.addWidget(script_out_panel)
+
+        script_splitter.setStretchFactor(0, 3)
+        script_splitter.setStretchFactor(1, 2)
+        lay_tab_scripts.addWidget(script_splitter)
+
+        self.tabs.addTab(self.tab_scripts, "🐍 Скрипты (Script Runner)")
+
+        # Tab 4: Help Section
         self.tab_help = QtWidgets.QWidget()
         lay_tab_help = QtWidgets.QVBoxLayout(self.tab_help)
         lay_tab_help.setContentsMargins(10, 10, 10, 10)
@@ -769,6 +844,101 @@ if devs:
 """
         self.run_action("exec", code=code)
 
+    # --- Управление вкладкой запуска скриптов ---
+    def on_script_template_selected(self, idx):
+        templates = {
+            1: (
+                "# 1. Информация об активном проекте\n"
+                "proj = projects.primary\n"
+                "if proj:\n"
+                "    print('Проект: ' + str(proj.get_name()))\n"
+                "    print('Путь: ' + str(proj.path))\n"
+                "    print('Модифицирован (dirty): ' + str(proj.is_dirty))\n"
+                "    result = {'name': proj.get_name(), 'path': proj.path, 'is_dirty': proj.is_dirty}\n"
+                "else:\n"
+                "    print('Нет активного открытого проекта')\n"
+                "    result = {'error': 'No active project'}\n"
+            ),
+            2: (
+                "# 2. Дерево объектов Application\n"
+                "proj = projects.primary\n"
+                "apps = proj.find('Application', True)\n"
+                "if apps:\n"
+                "    app = apps[0]\n"
+                "    print('Application: ' + app.get_name())\n"
+                "    for obj in app.get_children(True):\n"
+                "        print('  - ' + obj.get_name() + ' [' + str(obj.type) + ']')\n"
+                "else:\n"
+                "    print('Application не найден')\n"
+            ),
+            3: (
+                "# 3. Список оборудования (Device Tree)\n"
+                "proj = projects.primary\n"
+                "devs = proj.find('Device', True)\n"
+                "if devs:\n"
+                "    dev = devs[0]\n"
+                "    print('Главное устройство: ' + dev.get_name())\n"
+                "    for d in dev.get_children(True):\n"
+                "        print('  - ' + d.get_name() + ' [' + str(d.type) + ']')\n"
+                "else:\n"
+                "    print('Устройства Device не найдены')\n"
+            ),
+            4: (
+                "# 4. Онлайн статус контроллера\n"
+                "if online:\n"
+                "    print('Online state: ' + str(online.current_state))\n"
+                "    print('Is logged in: ' + str(online.is_logged_in))\n"
+                "    result = {'state': str(online.current_state), 'is_logged_in': online.is_logged_in}\n"
+                "else:\n"
+                "    print('Онлайн интерфейс недоступен')\n"
+            ),
+            5: (
+                "# 5. Пользовательский расчет и возврат структурированного JSON\n"
+                "proj = projects.primary\n"
+                "objs = proj.find('', True) if proj else []\n"
+                "print('Всего объектов в проекте: ' + str(len(objs)))\n"
+                "result = {\n"
+                "    'total_objects': len(objs),\n"
+                "    'timestamp': str(System.DateTime.Now),\n"
+                "    'params_received': params\n"
+                "}\n"
+            )
+        }
+        code = templates.get(idx)
+        if code:
+            self.txt_script_editor.setText(code)
+
+    def load_script_file(self):
+        fpath, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Выберите файл Python скрипта", "", "Python Script (*.py);;All Files (*)"
+        )
+        if fpath:
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    self.txt_script_editor.setText(f.read())
+            except Exception as ex:
+                QtWidgets.QMessageBox.warning(self, "Ошибка", "Не удалось прочитать файл:\n%s" % ex)
+
+    def save_script_file(self):
+        fpath, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Сохранить Python скрипт", "custom_script.py", "Python Script (*.py);;All Files (*)"
+        )
+        if fpath:
+            try:
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(self.txt_script_editor.toPlainText())
+            except Exception as ex:
+                QtWidgets.QMessageBox.warning(self, "Ошибка", "Не удалось сохранить файл:\n%s" % ex)
+
+    def run_editor_script(self):
+        code = self.txt_script_editor.toPlainText().strip()
+        if not code:
+            QtWidgets.QMessageBox.information(self, "Инфо", "Введите код скрипта для выполнения.")
+            return
+        self.txt_script_output.clear()
+        self.txt_script_output.append("<span style='color:#00f0ff;'>▶ Отправка скрипта на исполнение в среду...</span>\n")
+        self.run_action("exec", code=code, switch_tab=False)
+
     # --- Проверка статуса окружения ---
     def check_environment_status(self):
         is_net = (self.combo_mode.currentIndex() == 0)
@@ -846,15 +1016,16 @@ if devs:
                 self.lbl_script_status.setStyleSheet("color: #ef4444; font-weight: bold;")
 
     # --- Диспетчеризация действий (Сеть или Файл) ---
-    def run_action(self, action, clean=False, code=None):
+    def run_action(self, action, clean=False, code=None, switch_tab=True):
         self.save_config()
-        self.tabs.setCurrentIndex(0)
+        if switch_tab:
+            self.tabs.setCurrentIndex(0)
         is_net = (self.combo_mode.currentIndex() == 0)
 
         if is_net:
             self.run_network_action(action, clean=clean, code=code)
         else:
-            self.run_file_ipc_action(action, clean=clean)
+            self.run_file_ipc_action(action, clean=clean, code=code)
 
     def run_network_action(self, action, clean=False, code=None):
         host = self.txt_net_host.text().strip()
@@ -998,13 +1169,22 @@ if devs:
             elif action == "save":
                 self.write_log(f"\n<span style='color:#10b981; font-weight:bold;'>=== {res.get('message', 'Проект успешно сохранен')} ===</span>")
 
+            elif action == "exec":
+                out_txt = res.get("log", "").strip()
+                if "result" in res:
+                    res_json = json.dumps(res["result"], indent=2, ensure_ascii=False)
+                    out_txt += f"\n\n=== РЕЗУЛЬТАТ (JSON) ===\n{res_json}"
+                    self.write_log(f"\n<span style='color:#00f0ff; font-weight:bold;'>=== РЕЗУЛЬТАТ СКРИПТА (JSON) ===</span>\n<pre>{res_json}</pre>")
+                if hasattr(self, "txt_script_output") and out_txt:
+                    self.txt_script_output.append(f"<pre style='color:#e3e3e6;'>{out_txt}</pre>")
+
             self.refresh_git_status()
 
         self.net_worker = NetworkWorker(host, port, req_data, timeout=90.0)
         self.net_worker.finished_signal.connect(on_net_done)
         self.net_worker.start()
 
-    def run_file_ipc_action(self, action, clean=False):
+    def run_file_ipc_action(self, action, clean=False, code=None):
         self.write_log(f"\n<span style='color:#00f0ff; font-weight:bold;'>=== 💻 ЛОКАЛЬНАЯ IPC ОПЕРАЦИЯ: {action.upper()} ===</span>")
         if os.path.exists(res_path):
             try: os.remove(res_path)
@@ -1022,6 +1202,8 @@ if devs:
             "add_context": self.chk_add_context.isChecked(),
             "clean": clean
         }
+        if code:
+            req_data["code"] = code
         
         try:
             with open(req_path, "w", encoding="utf-8") as f:
@@ -1058,6 +1240,15 @@ if devs:
                     res = json.load(f)
                 success = res.get("success", False) or res.get("status") == "ok"
                 error = res.get("error", res.get("message", ""))
+                if "result" in res:
+                    res_json = json.dumps(res["result"], indent=2, ensure_ascii=False)
+                    self.write_log(f"\n<span style='color:#00f0ff; font-weight:bold;'>=== РЕЗУЛЬТАТ СКРИПТА (JSON) ===</span>\n<pre>{res_json}</pre>")
+                if hasattr(self, "txt_script_output"):
+                    out_txt = res.get("log", "").strip()
+                    if "result" in res:
+                        out_txt += f"\n\n=== РЕЗУЛЬТАТ (JSON) ===\n{json.dumps(res['result'], indent=2, ensure_ascii=False)}"
+                    if out_txt:
+                        self.txt_script_output.append(f"<pre style='color:#e3e3e6;'>{out_txt}</pre>")
                 if success:
                     self.write_log("\n<span style='color:#10b981; font-weight:bold;'>=== IPC ОПЕРАЦИЯ ВЫПОЛНЕНА УСПЕШНО ===</span>")
                 else:

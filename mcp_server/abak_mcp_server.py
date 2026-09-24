@@ -200,20 +200,32 @@ def abak_save_project(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dic
 
 
 @app.tool()
-def abak_exec_python(code: str, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dict[str, Any]:
+def abak_exec_python(code: str = "", script_path: str = "", params: Optional[Dict[str, Any]] = None, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dict[str, Any]:
     """Execute arbitrary Python 2.7 / IronPython code directly inside CODESYS / Abak.IDE ScriptEngine.
     
     The script has access to:
-      - `script_engine.projects.primary` (Active project)
-      - `system`
+      - `projects.primary` / `active_project` (Active project)
+      - `system` (CODESYS System API)
+      - `online` (CODESYS Online API)
+      - `params` (Dictionary of passed parameters)
+      - `result` (Assign result = {...} in script to return structured data in response['result'])
       - `print` (captured and returned in response log)
     
     Args:
-        code: Python code string to execute inside CODESYS.
+        code: Python code string to execute inside CODESYS (or omit if using script_path).
+        script_path: Optional path to a .py script file on the engineering station.
+        params: Optional dictionary of arguments/parameters injected into the script scope.
         host: IP address of the engineering station.
         port: TCP port of the bridge server.
     """
-    return send_tcp_request(host, port, {"action": "exec", "code": code}, timeout=60.0)
+    req: Dict[str, Any] = {"action": "exec"}
+    if code:
+        req["code"] = code
+    if script_path:
+        req["script_path"] = script_path
+    if params:
+        req["params"] = params
+    return send_tcp_request(host, port, req, timeout=60.0)
 
 
 @app.tool()

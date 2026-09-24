@@ -111,13 +111,28 @@
 ---
 
 ## 5. Действие: `exec`
-Выполнение произвольного кода IronPython внутри среды CODESYS с перехватом стандартного вывода (stdout).
+Выполнение произвольного кода IronPython внутри среды CODESYS с перехватом вывода (stdout/stderr) и возвратом структурированных данных через переменную `result`.
+
+**Параметры запроса**:
+- `code` *(string, optional)*: Текст исполняемого Python-скрипта.
+- `script_path` *(string, optional)*: Путь к `.py` файлу на диске инженерной станции (если не передан `code`).
+- `params` *(object, optional)*: Словарь параметров, пробрасываемый в область видимости скрипта как `params`.
+- `args` *(array, optional)*: Список аргументов, доступный в скрипте как `args`.
+
+**Переменные в области видимости (scope)**:
+- `projects.primary` / `active_project`: Ссылка на активный открытый проект.
+- `system`: Системный API CODESYS (`ScriptSystem`).
+- `online`: Онлайн API CODESYS (`ScriptOnline`).
+- `System`: Пространство имен .NET CLR.
+- `params`: Переданный словарь параметров.
+- `result`: Переменная для возврата структурированного JSON-ответа (например: `result = {"count": 10}`).
 
 **Запрос**:
 ```json
 {
   "action": "exec",
-  "code": "print('Open project: ' + script_engine.projects.primary.path)"
+  "code": "proj = projects.primary\nprint('Project: ' + proj.get_name())\nresult = {'name': proj.get_name(), 'objects_count': len(proj.find('', True))}",
+  "params": {"custom_tag": "test"}
 }
 ```
 
@@ -125,7 +140,11 @@
 ```json
 {
   "status": "ok",
-  "log": "Open project: D:\\Projects\\PLC\\my_plc_project.project\n"
+  "log": "Project: MyControllerProject\n",
+  "result": {
+    "name": "MyControllerProject",
+    "objects_count": 84
+  }
 }
 ```
 

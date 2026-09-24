@@ -150,22 +150,40 @@ def action_compile(req):
 
 def action_exec(req):
     code_str = req.get("code", "")
+    script_path = req.get("script_path", "")
+    if not code_str and script_path:
+        if os.path.exists(script_path):
+            try:
+                with io.open(script_path, "r", encoding="utf-8") as f:
+                    code_str = f.read()
+            except Exception as ex_read:
+                with open(script_path, "r") as f:
+                    code_str = f.read()
+        else:
+            return {"status": "error", "message": "Script file not found: %s" % script_path}
+
     if not code_str:
-        return {"status": "error", "message": "No code provided"}
+        return {"status": "error", "message": "No code or script_path provided"}
 
     cap = OutputCapture()
     cap.start()
     err = None
+    res_val = None
     try:
-        # IronPython exec
+        # IronPython execution scope
         scope = {
             "script_engine": sys.modules["__main__"],
             "projects": projects,
             "system": system,
             "online": online,
-            "System": System
+            "System": System,
+            "active_project": projects.primary if projects else None,
+            "params": req.get("params", {}),
+            "args": req.get("args", []),
+            "result": None
         }
         exec(code_str, scope)
+        res_val = scope.get("result")
     except Exception as ex:
         err = traceback.format_exc()
         print("SCRIPT_ERROR: " + str(ex))
@@ -174,7 +192,11 @@ def action_exec(req):
 
     if err:
         return {"status": "error", "message": str(err), "log": out_text}
-    return {"status": "ok", "log": out_text}
+    
+    resp = {"status": "ok", "log": out_text}
+    if res_val is not None:
+        resp["result"] = res_val
+    return resp
 
 def action_map_io(req):
     """

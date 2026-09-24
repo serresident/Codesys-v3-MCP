@@ -95,13 +95,28 @@ def cmd_compile(args):
 
 def cmd_exec(args):
     code_text = args.code
+    params = {}
+    if getattr(args, "params", None):
+        try:
+            params = json.loads(args.params)
+        except Exception as ex:
+            print(f"Error parsing --params JSON: {ex}", file=sys.stderr)
+            sys.exit(1)
+
+    req = {"action": "exec"}
     if os.path.exists(code_text):
         with open(code_text, "r", encoding="utf-8") as f:
             code_text = f.read()
+    req["code"] = code_text
+    if params:
+        req["params"] = params
 
-    r = send_request(args.host, args.port, {"action": "exec", "code": code_text}, timeout=60.0)
+    r = send_request(args.host, args.port, req, timeout=60.0)
     if r.get("log"):
         print(r["log"])
+    if "result" in r:
+        print("RESULT:")
+        print(json.dumps(r["result"], indent=2, ensure_ascii=False))
     if r.get("status") == "error":
         print(f"ERROR: {r.get('message')}", file=sys.stderr)
         sys.exit(1)
@@ -286,6 +301,7 @@ def main():
     # exec
     p_exec = sub.add_parser("exec", help="Execute Python code on IDE ScriptEngine")
     p_exec.add_argument("code", help="Code string or path to .py file")
+    p_exec.add_argument("--params", help="Optional JSON string of parameters passed to script scope")
 
     # map-io
     p_map = sub.add_parser("map-io", help="Map device channel to variable")
