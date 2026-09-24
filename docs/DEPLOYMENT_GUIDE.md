@@ -167,7 +167,7 @@ deploy_server.bat
 
 ## 5. Доступные инструменты агента (MCP Tools)
 
-После подключения агенту становятся доступны 8 специализированных инструментов:
+После подключения агенту становятся доступны **16 специализированных инструментов**:
 
 | MCP Tool | Назначение | Аргументы |
 | :--- | :--- | :--- |
@@ -179,6 +179,14 @@ deploy_server.bat
 | `abak_export_sources` | Экспорт всех ST-исходников открытого проекта в JSON | `host`, `port` |
 | `abak_save_project` | Сохранение открытого проекта в Abak.IDE | `host`, `port` |
 | `abak_exec_python` | Выполнение произвольного кода IronPython в ScriptEngine CODESYS | `code`, `host`, `port` |
+| `abak_online_status` | Проверка онлайн-подключения к ПЛК и статуса выполнения (RUN/STOP) | `host`, `port` |
+| `abak_online_login` | Подключение (Login) к целевому ПЛК через шлюз проекта | `change_option`, `host`, `port` |
+| `abak_online_logout` | Отключение (Logout) от ПЛК | `host`, `port` |
+| `abak_online_control` | Управление выполнением ПЛК (`start`, `stop`, `reset_warm`, `reset_cold`) | `command`, `host`, `port` |
+| `abak_online_read_vars` | Чтение реальных значений переменных ПЛК в цикле выполнения | `expressions`, `host`, `port` |
+| `abak_online_write_vars` | Запись или форсирование (Force) значений переменных в ПЛК | `values`, `force`, `host`, `port` |
+| `abak_export_plcopen_xml` | Экспорт приложения в промышленный стандарт PLCopen XML | `path`, `host`, `port` |
+| `abak_import_plcopen_xml` | Импорт компонентов из стандарта PLCopen XML в проект | `path`, `xml_content`, `host`, `port` |
 
 ---
 

@@ -289,6 +289,236 @@ def action_import(req):
     proj.save()
     return {"status": "ok", "results": results}
 
+def action_online_status(req):
+    """
+    Проверка онлайн-статуса подключения к ПЛК и состояния выполнения (RUN / STOP).
+    """
+    proj = projects.primary
+    if not proj:
+        return {"status": "error", "message": "No active project"}
+    apps = proj.find("Application", True)
+    if not apps:
+        return {"status": "error", "message": "Application not found"}
+    app = apps[0]
+    
+    try:
+        online_app = app.create_online_application()
+        is_logged = bool(online_app.is_logged_in)
+        state_str = str(online_app.application_state) if is_logged else "offline"
+        op_state = str(online_app.operation_state) if is_logged else "none"
+        return {
+            "status": "ok",
+            "is_logged_in": is_logged,
+            "application_state": state_str,
+            "operation_state": op_state
+        }
+    except Exception as ex:
+        return {"status": "error", "message": str(ex)}
+
+def action_online_login(req):
+    """
+    Подключение (Login) к ПЛК через настроенный шлюз.
+    Параметры:
+      change_option: 'Try' (default), 'Never', 'Force', 'Keep'
+    """
+    proj = projects.primary
+    if not proj:
+        return {"status": "error", "message": "No active project"}
+    apps = proj.find("Application", True)
+    if not apps:
+        return {"status": "error", "message": "Application not found"}
+    app = apps[0]
+
+    opt_str = req.get("change_option", "Try")
+    opt = getattr(script_engine.OnlineChangeOption, opt_str, script_engine.OnlineChangeOption.Try)
+
+    try:
+        online_app = app.create_online_application()
+        online_app.login(opt, False)
+        return {
+            "status": "ok",
+            "is_logged_in": bool(online_app.is_logged_in),
+            "application_state": str(online_app.application_state)
+        }
+    except Exception as ex:
+        return {"status": "error", "message": str(ex)}
+
+def action_online_logout(req):
+    """
+    Отключение (Logout) от ПЛК.
+    """
+    proj = projects.primary
+    if not proj:
+        return {"status": "error", "message": "No active project"}
+    apps = proj.find("Application", True)
+    if not apps:
+        return {"status": "error", "message": "Application not found"}
+    app = apps[0]
+    try:
+        online_app = app.create_online_application()
+        online_app.logout()
+        return {"status": "ok", "is_logged_in": False}
+    except Exception as ex:
+        return {"status": "error", "message": str(ex)}
+
+def action_online_control(req):
+    """
+    Управление состоянием ПЛК: start (RUN), stop (STOP), reset_warm, reset_cold.
+    """
+    proj = projects.primary
+    if not proj:
+        return {"status": "error", "message": "No active project"}
+    apps = proj.find("Application", True)
+    if not apps:
+        return {"status": "error", "message": "Application not found"}
+    app = apps[0]
+    cmd = req.get("command", "").lower()
+
+    try:
+        online_app = app.create_online_application()
+        if not online_app.is_logged_in:
+            online_app.login(script_engine.OnlineChangeOption.Try, False)
+
+        if cmd in ("start", "run"):
+            online_app.start()
+        elif cmd == "stop":
+            online_app.stop()
+        elif cmd == "reset_warm":
+            online_app.reset(script_engine.ResetOption.Warm)
+        elif cmd == "reset_cold":
+            online_app.reset(script_engine.ResetOption.Cold)
+        else:
+            return {"status": "error", "message": "Unknown command: %s (expected start, stop, reset_warm, reset_cold)" % cmd}
+
+        return {
+            "status": "ok",
+            "command": cmd,
+            "application_state": str(online_app.application_state)
+        }
+    except Exception as ex:
+        return {"status": "error", "message": str(ex)}
+
+def action_online_read(req):
+    """
+    Чтение живых значений переменных из памяти ПЛК в реальном времени.
+    Параметры:
+      expressions: list[str] (список полных путей к переменным, напр. ['Application.GVL.rTemp'])
+    """
+    proj = projects.primary
+    if not proj:
+        return {"status": "error", "message": "No active project"}
+    apps = proj.find("Application", True)
+    if not apps:
+        return {"status": "error", "message": "Application not found"}
+    app = apps[0]
+
+    exprs = req.get("expressions", [])
+    if isinstance(exprs, (str, unicode)):
+        exprs = [exprs]
+
+    try:
+        online_app = app.create_online_application()
+        if not online_app.is_logged_in:
+            online_app.login(script_engine.OnlineChangeOption.Try, False)
+
+        values = {}
+        for expr in exprs:
+            try:
+                v = online_app.read_value(str(expr))
+                values[expr] = str(v)
+            except Exception as ve:
+                values[expr] = "ERROR: " + str(ve)
+
+        return {"status": "ok", "values": values}
+    except Exception as ex:
+        return {"status": "error", "message": str(ex)}
+
+def action_online_write(req):
+    """
+    Запись или форсирование значений переменных в ПЛК.
+    Параметры:
+      values: dict[str, str] (словарь {'Application.GVL.myVar': '123.4'})
+      force: bool (True для принудительного форсирования, False для обычной записи)
+    """
+    proj = projects.primary
+    if not proj:
+        return {"status": "error", "message": "No active project"}
+    apps = proj.find("Application", True)
+    if not apps:
+        return {"status": "error", "message": "Application not found"}
+    app = apps[0]
+
+    val_dict = req.get("values", {})
+    force = req.get("force", False)
+
+    try:
+        online_app = app.create_online_application()
+        if not online_app.is_logged_in:
+            online_app.login(script_engine.OnlineChangeOption.Try, False)
+
+        for expr, val in val_dict.items():
+            online_app.set_prepared_value(str(expr), str(val))
+
+        if force:
+            online_app.force_prepared_values()
+        else:
+            online_app.write_prepared_values()
+
+        return {"status": "ok", "written": val_dict, "forced": force}
+    except Exception as ex:
+        return {"status": "error", "message": str(ex)}
+
+def action_export_xml(req):
+    """
+    Экспорт объектов проекта в стандартный формат PLCopen XML.
+    """
+    proj = projects.primary
+    if not proj:
+        return {"status": "error", "message": "No active project"}
+    apps = proj.find("Application", True)
+    if not apps:
+        return {"status": "error", "message": "Application not found"}
+    app = apps[0]
+
+    target_path = req.get("path")
+    try:
+        if target_path:
+            proj.export_xml([app], path=target_path, recursive=True, export_folder_structure=True)
+            return {"status": "ok", "path": target_path}
+        else:
+            xml_str = proj.export_xml([app], recursive=True, export_folder_structure=True)
+            return {"status": "ok", "xml": xml_str}
+    except Exception as ex:
+        return {"status": "error", "message": str(ex)}
+
+def action_import_xml(req):
+    """
+    Импорт объектов проекта из стандартного формата PLCopen XML.
+    """
+    proj = projects.primary
+    if not proj:
+        return {"status": "error", "message": "No active project"}
+
+    xml_path = req.get("path")
+    xml_content = req.get("xml")
+
+    try:
+        if not xml_path and xml_content:
+            import tempfile
+            temp_path = os.path.join(tempfile.gettempdir(), "import_temp.xml")
+            with io.open(temp_path, "w", encoding="utf-8") as f:
+                f.write(unicode(xml_content))
+            xml_path = temp_path
+
+        if not xml_path or not os.path.exists(xml_path):
+            return {"status": "error", "message": "XML file not found: %s" % xml_path}
+
+        proj.import_xml(xml_path)
+        proj.save()
+        return {"status": "ok", "imported_from": xml_path}
+    except Exception as ex:
+        return {"status": "error", "message": str(ex)}
+
 # ------------------------------------------------------------------------------
 # Диспетчер команд
 # ------------------------------------------------------------------------------
@@ -300,6 +530,14 @@ COMMAND_MAP = {
     "map_io": action_map_io,
     "export": action_export,
     "import": action_import,
+    "online_status": action_online_status,
+    "online_login": action_online_login,
+    "online_logout": action_online_logout,
+    "online_control": action_online_control,
+    "online_read": action_online_read,
+    "online_write": action_online_write,
+    "export_xml": action_export_xml,
+    "import_xml": action_import_xml,
 }
 
 def dispatch_request(req):

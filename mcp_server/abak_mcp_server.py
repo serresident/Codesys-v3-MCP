@@ -216,6 +216,114 @@ def abak_exec_python(code: str, host: str = DEFAULT_HOST, port: int = DEFAULT_PO
     return send_tcp_request(host, port, {"action": "exec", "code": code}, timeout=60.0)
 
 
+@app.tool()
+def abak_online_status(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dict[str, Any]:
+    """Check online connection status to PLC and execution state (RUN, STOP, etc.).
+    
+    Args:
+        host: IP address of the engineering station.
+        port: TCP port of the bridge server.
+    """
+    return send_tcp_request(host, port, {"action": "online_status"}, timeout=10.0)
+
+
+@app.tool()
+def abak_online_login(change_option: str = "Try", host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dict[str, Any]:
+    """Connect online (Login) to the physical or simulated PLC via CODESYS Gateway.
+    
+    Args:
+        change_option: Online change strategy ('Try', 'Never', 'Force', 'Keep').
+        host: IP address of the engineering station.
+        port: TCP port of the bridge server.
+    """
+    return send_tcp_request(host, port, {"action": "online_login", "change_option": change_option}, timeout=20.0)
+
+
+@app.tool()
+def abak_online_logout(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dict[str, Any]:
+    """Disconnect (Logout) from the PLC.
+    
+    Args:
+        host: IP address of the engineering station.
+        port: TCP port of the bridge server.
+    """
+    return send_tcp_request(host, port, {"action": "online_logout"}, timeout=10.0)
+
+
+@app.tool()
+def abak_online_control(command: str, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dict[str, Any]:
+    """Control PLC execution state: start (RUN), stop (STOP), reset_warm, reset_cold.
+    
+    Args:
+        command: Command to execute: 'start', 'stop', 'reset_warm', or 'reset_cold'.
+        host: IP address of the engineering station.
+        port: TCP port of the bridge server.
+    """
+    return send_tcp_request(host, port, {"action": "online_control", "command": command}, timeout=15.0)
+
+
+@app.tool()
+def abak_online_read_vars(expressions: List[str], host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dict[str, Any]:
+    """Read live values of PLC variables in real-time from controller memory.
+    
+    Args:
+        expressions: List of full variable paths to read (e.g. ['Application.GVL.rTemp', 'Application.GVL_Raw.raw_Press']).
+        host: IP address of the engineering station.
+        port: TCP port of the bridge server.
+    """
+    return send_tcp_request(host, port, {"action": "online_read", "expressions": expressions}, timeout=15.0)
+
+
+@app.tool()
+def abak_online_write_vars(
+    values: Dict[str, str],
+    force: bool = False,
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT
+) -> Dict[str, Any]:
+    """Write or force variable values directly into PLC controller memory.
+    
+    Args:
+        values: Dictionary mapping variable paths to their new string values (e.g. {'Application.GVL.SP_Temp': '75.5'}).
+        force: If True, forces values in PLC. If False, performs standard write.
+        host: IP address of the engineering station.
+        port: TCP port of the bridge server.
+    """
+    req = {
+        "action": "online_write",
+        "values": values,
+        "force": force
+    }
+    return send_tcp_request(host, port, req, timeout=15.0)
+
+
+@app.tool()
+def abak_export_plcopen_xml(file_path: Optional[str] = None, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dict[str, Any]:
+    """Export project application to standard PLCopen XML format.
+    
+    Args:
+        file_path: Optional target file path on the engineering station. If omitted, returns XML text in response.
+        host: IP address of the engineering station.
+        port: TCP port of the bridge server.
+    """
+    req = {"action": "export_xml"}
+    if file_path:
+        req["path"] = file_path
+    return send_tcp_request(host, port, req, timeout=30.0)
+
+
+@app.tool()
+def abak_import_plcopen_xml(file_path: str, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dict[str, Any]:
+    """Import PLCopen XML file into active project in Abak.IDE.
+    
+    Args:
+        file_path: Full file path to the PLCopen XML file on the engineering station.
+        host: IP address of the engineering station.
+        port: TCP port of the bridge server.
+    """
+    return send_tcp_request(host, port, {"action": "import_xml", "path": file_path}, timeout=30.0)
+
+
 def main():
     # Run MCP server using standard IO transport
     app.run(transport="stdio")

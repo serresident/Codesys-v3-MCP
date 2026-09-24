@@ -183,3 +183,196 @@
   }
 }
 ```
+
+---
+
+## 8. Действие: `online_status`
+Проверка онлайн-подключения к целевому ПЛК и статуса выполнения (RUN, STOP, etc.).
+
+**Запрос**:
+```json
+{
+  "action": "online_status"
+}
+```
+
+**Ответ**:
+```json
+{
+  "status": "ok",
+  "is_logged_in": true,
+  "application_state": "run",
+  "operation_state": "none"
+}
+```
+
+---
+
+## 9. Действие: `online_login`
+Подключение (Login) к ПЛК через сконфигурированный шлюз и коммуникационный канал проекта.
+
+**Запрос**:
+```json
+{
+  "action": "online_login",
+  "change_option": "Try"
+}
+```
+* `change_option` (string, optional, по умолчанию `"Try"`): режим загрузки изменений (`"Try"`, `"Never"`, `"Force"`, `"Keep"`).
+
+**Ответ**:
+```json
+{
+  "status": "ok",
+  "is_logged_in": true,
+  "application_state": "run"
+}
+```
+
+---
+
+## 10. Действие: `online_logout`
+Корректное отключение (Logout) от ПЛК.
+
+**Запрос**:
+```json
+{
+  "action": "online_logout"
+}
+```
+
+**Ответ**:
+```json
+{
+  "status": "ok",
+  "is_logged_in": false
+}
+```
+
+---
+
+## 11. Действие: `online_control`
+Управление жизненным циклом выполнения приложения на ПЛК (запуск, останов, сброс).
+
+**Запрос**:
+```json
+{
+  "action": "online_control",
+  "command": "start"
+}
+```
+* `command` (string, required): одна из команд — `"start"` (RUN), `"stop"` (STOP), `"reset_warm"`, `"reset_cold"`.
+
+**Ответ**:
+```json
+{
+  "status": "ok",
+  "command": "start",
+  "application_state": "run"
+}
+```
+
+---
+
+## 12. Действие: `online_read`
+Чтение значений переменных программы из памяти ПЛК в реальном времени.
+
+**Запрос**:
+```json
+{
+  "action": "online_read",
+  "expressions": [
+    "Application.PLC_PRG.iCycleCount",
+    "Application.GVL.rMotorSpeed",
+    "Application.GVL.bSafetyOk"
+  ]
+}
+```
+
+**Ответ**:
+```json
+{
+  "status": "ok",
+  "values": {
+    "Application.PLC_PRG.iCycleCount": "10482",
+    "Application.GVL.rMotorSpeed": "1450.5",
+    "Application.GVL.bSafetyOk": "TRUE"
+  }
+}
+```
+
+---
+
+## 13. Действие: `online_write`
+Запись или принудительное форсирование (Force) значений переменных в ПЛК.
+
+**Запрос**:
+```json
+{
+  "action": "online_write",
+  "values": {
+    "Application.GVL.rTargetSpeed": "1500.0",
+    "Application.GVL.bManualOverride": "TRUE"
+  },
+  "force": false
+}
+```
+* `values` (object, required): словарь пар `"ИмяПеременной": "ЗначениеВВидеСтроки"`.
+* `force` (boolean, optional, по умолчанию `false`): если `true`, значения форсируются (`force_prepared_values()`).
+
+**Ответ**:
+```json
+{
+  "status": "ok",
+  "written": {
+    "Application.GVL.rTargetSpeed": "1500.0",
+    "Application.GVL.bManualOverride": "TRUE"
+  },
+  "forced": false
+}
+```
+
+---
+
+## 14. Действие: `export_xml`
+Экспорт приложения в промышленный стандарт PLCopen XML (с сохранением структуры папок и POUs).
+
+**Запрос**:
+```json
+{
+  "action": "export_xml",
+  "path": "C:\\Projects\\Export\\application_backup.xml"
+}
+```
+* `path` (string, optional): если указан путь, сохраняет XML в файл на сервере. Если не указан, возвращает полное XML-содержимое в поле `"xml"`.
+
+**Ответ**:
+```json
+{
+  "status": "ok",
+  "path": "C:\\Projects\\Export\\application_backup.xml"
+}
+```
+
+---
+
+## 15. Действие: `import_xml`
+Импорт программных компонентов из файла стандарта PLCopen XML в активный проект.
+
+**Запрос**:
+```json
+{
+  "action": "import_xml",
+  "path": "C:\\Projects\\Export\\application_backup.xml"
+}
+```
+* `path` (string, optional): путь к XML-файлу на диске сервера.
+* `xml` (string, optional): альтернативно — строка с содержимым XML.
+
+**Ответ**:
+```json
+{
+  "status": "ok",
+  "imported_from": "C:\\Projects\\Export\\application_backup.xml"
+}
+```

@@ -11,7 +11,10 @@
 - Программное редактирование AST, POU, DUT, GVL, типов данных и задач.
 - Программная аппаратная привязка (I/O Mapping) физических каналов модулей ввода/вывода (CANopen, Modbus, Profinet) к переменным IEC 61131-3 без ручных кликов мыши.
 - Удаленная инкрементальная и чистая компиляция (Clean & Build) с получением диагностических сообщений, ошибок и предупреждений компилятора в формате JSON.
+- **Онлайн-мониторинг и управление ПЛК**: чтение (`online_read`) и запись/форсирование (`online_write`) переменных в реальном времени, опрос статуса выполнения программы (`online_status`: RUN/STOP), удаленный пуск, останов и сброс (`online_control`).
+- **Экспорт и импорт PLCopen XML**: резервное копирование и перенос логики программ в международном стандарте PLCopen XML (`export_xml`, `import_xml`).
 - Выполнение произвольных сценариев автоматизации на IronPython внутри адресного пространства CODESYS.
+- **Полная база типизации ScriptEngine**: каталог `stubs/scriptengine/` с 48 официальными файлами `.pyi` и исчерпывающим справочником API `stubs/scriptDoc.txt` для идеального автодополнения (IntelliSense) и работы LLM.
 - **Главная особенность**: среда Abak.IDE не блокируется, интерфейс (GUI) остается на 100% отзывчивым благодаря интеграции в цикл обработки событий через `System.Windows.Forms.Timer`.
 
 ---
@@ -23,6 +26,7 @@
 │  Внешняя система / Агент / Хост (напр. 192.168.1.50)   │
 │  - Python 3 CLI / REST Client (abak_bridge_client.py) │
 │  - Редактор VS Code / ИИ-ассистент Antigravity         │
+│  - MCP Server: 16 нативных инструментов автоматизации  │
 └───────────────────────────┬────────────────────────────┘
                             │ HTTP JSON (TCP Port 11888)
                             ▼
@@ -36,7 +40,10 @@
 │  │ │ - System.Windows.Forms.Timer (UI Event Loop) │ │  │
 │  │ │ - System.Net.Sockets.TcpListener (:11888)    │ │  │
 │  │ │ - Dispatcher: status, import, export,        │ │  │
-│  │ │               compile, exec, map_io, save   │ │  │
+│  │ │               compile, exec, map_io, save,   │ │  │
+│  │ │               online_status, online_read,    │ │  │
+│  │ │               online_write, online_control,  │ │  │
+│  │ │               export_xml, import_xml         │ │  │
 │  │ └──────────────────────┬───────────────────────┘ │  │
 │  │                        │ ScriptEngine APIs       │  │
 │  │ ┌──────────────────────▼───────────────────────┐ │  │
@@ -45,6 +52,7 @@
 │  │ │ - Application (POUs, GVLs, DUTs, Tasks)     │ │  │
 │  │ │ - Device Tree (CANbus, I/O Modules, Mapping) │ │  │
 │  │ │ - Compiler (build, clean, get_messages)      │ │  │
+│  │ │ - OnlineManager (login, RUN/STOP, read/write)│ │  │
 │  │ └──────────────────────────────────────────────┘ │  │
 │  └──────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────┘
@@ -82,41 +90,37 @@
 ```bash
 python client/abak_bridge_client.py --host 192.168.1.100 status
 ```
-Вывод:
-```json
-{
-  "status": "ok",
-  "project_open": true,
-  "project_path": "D:\\Projects\\...\\my_project.project",
-  "app_name": "Application"
-}
-```
 
-### Шаг 3: Выгрузка всех исходных кодов в ST
+### Шаг 4: Онлайн-мониторинг переменных ПЛК
 ```bash
-python client/abak_bridge_client.py --host 192.168.1.100 export --out ./sources
-```
+# Чтение текущих значений переменных
+python client/abak_bridge_client.py --host 192.168.1.100 online-read --vars Application.PLC_PRG.iCounter Application.GVL.rSpeed
 
-### Шаг 4: Загрузка изменений и компиляция
-```bash
-python client/abak_bridge_client.py --host 192.168.1.100 import --src ./sources
-python client/abak_bridge_client.py --host 192.168.1.100 compile
+# Запись нового значения
+python client/abak_bridge_client.py --host 192.168.1.100 online-write --vars Application.GVL.rSpeed=1200.0
+
+# Проверка состояния ПЛК (RUN/STOP)
+python client/abak_bridge_client.py --host 192.168.1.100 online-status
 ```
 
 ---
 
 ## 4. Структура репозитория
 
+```
 ├── README.md                      # Главное описание и руководство по эксплуатации
 ├── PROJECT_CONTEXT.md             # Сетевые адреса, учетные данные, системный контекст
 ├── requirements.txt               # Зависимости Python клиента (PyQt6, mcp)
 ├── run_gui.bat                    # Быстрый запуск Cyberpunk GUI Менеджера
 ├── server/                        # Скрипты сервера (выполняются внутри Abak.IDE / IronPython)
-│   ├── codesys_bridge_server.py   # Основной стабильный сервер (TCP HTTP + локальный IPC)
+│   ├── codesys_bridge_server.py   # Сервер моста (15 API-действий: онлайн, ST, XML, сборка)
 │   ├── deploy_server.bat          # 1-клик настройка брандмауэра и сети на инженерном ПК
 │   └── start_with_project.bat     # Автозапуск Abak.IDE с проектом и сервером в фоне
 ├── mcp_server/                    # Model Context Protocol (MCP) для AI-агентов
-│   └── abak_mcp_server.py         # MCP Stdio сервер (Antigravity, Claude, Cursor, VS Code)
+│   └── abak_mcp_server.py         # 16 нативных MCP-инструментов (Antigravity, Claude, Cursor)
+├── stubs/                         # Полная официальная база типизации и документация
+│   ├── scriptDoc.txt              # Исчерпывающий справочник ScriptEngine API (244 КБ)
+│   └── scriptengine/              # 48 официальных .pyi стабов типов CODESYS V3.5
 ├── client/                        # Клиентские утилиты (выполняются на хосте / агенте)
 │   ├── gui_manager.py             # Cyberpunk GUI менеджер (PyQt6) с вкладкой Git
 │   ├── abak_bridge_client.py      # Полнофункциональный CLI и Python-модуль
@@ -124,11 +128,12 @@ python client/abak_bridge_client.py --host 192.168.1.100 compile
 │       ├── 01_health_check.py     # Быстрая диагностика связи
 │       ├── 02_inspect_project.py  # Полный дамп дерева устройств и логики
 │       ├── 03_io_mapping.py       # Программная привязка каналов ввода/вывода
+│       ├── 04_online_monitoring.py# Чтение и запись переменных ПЛК онлайн
 │       └── inspect_live_mapping.py# Инспекция текущих привязок модуля и GVL
 └── docs/                          # Подробная техническая документация
     ├── DEPLOYMENT_GUIDE.md        # Пошаговое руководство по развертыванию на других ПК
     ├── ARCHITECTURE.md            # Устройство сервера, потоковая модель, ScriptEngine
-    ├── API_REFERENCE.md           # Спецификация сетевого протокола и JSON-команд
+    ├── API_REFERENCE.md           # Спецификация 15 эндпоинтов сетевого протокола
     ├── IO_MAPPING_GUIDE.md        # Руководство по аппаратной привязке каналов
     └── LESSONS_LEARNED.md         # Ошибки, тонкости IronPython/.NET и их решения
 ```

@@ -175,6 +175,91 @@ def cmd_import(args):
     r = send_request(args.host, args.port, {"action": "import", "files": files_data}, timeout=60.0)
     print(json.dumps(r, indent=2, ensure_ascii=False))
 
+def cmd_inspect_tree(args):
+    code = """
+proj = script_engine.projects.primary
+print('=== APPLICATION OBJECTS ===')
+apps = proj.find('Application', True)
+if apps:
+    app = apps[0]
+    stack = [('', app)]
+    while stack:
+        p, n = stack.pop(0)
+        for c in n.get_children(False):
+            curr = p + '/' + c.get_name()
+            print('  ' + curr + ' [' + str(c.type) + ']')
+            stack.append((curr, c))
+
+print('\\n=== HARDWARE DEVICES ===')
+devs = proj.find('Device', True)
+if devs:
+    dev_stack = [('', devs[0])]
+    while dev_stack:
+        p, d = dev_stack.pop(0)
+        for c in d.get_children(False):
+            curr = p + '/' + c.get_name()
+            print('  ' + curr + ' [' + str(c.type) + ']')
+            dev_stack.append((curr, c))
+"""
+    r = send_request(args.host, args.port, {"action": "exec", "code": code}, timeout=30.0)
+    if r.get("log"):
+        print(r["log"])
+    else:
+        print(json.dumps(r, indent=2, ensure_ascii=False))
+
+def cmd_online_status(args):
+    r = send_request(args.host, args.port, {"action": "online_status"})
+    print(json.dumps(r, indent=2, ensure_ascii=False))
+
+def cmd_online_login(args):
+    r = send_request(args.host, args.port, {"action": "online_login", "change_option": args.change_option})
+    print(json.dumps(r, indent=2, ensure_ascii=False))
+
+def cmd_online_logout(args):
+    r = send_request(args.host, args.port, {"action": "online_logout"})
+    print(json.dumps(r, indent=2, ensure_ascii=False))
+
+def cmd_online_control(args):
+    r = send_request(args.host, args.port, {"action": "online_control", "command": args.command})
+    print(json.dumps(r, indent=2, ensure_ascii=False))
+
+def cmd_online_read(args):
+    r = send_request(args.host, args.port, {"action": "online_read", "expressions": args.vars})
+    print(json.dumps(r, indent=2, ensure_ascii=False))
+
+def cmd_online_write(args):
+    val_dict = {}
+    for item in args.vars:
+        if "=" in item:
+            k, v = item.split("=", 1)
+            val_dict[k.strip()] = v.strip()
+        else:
+            print(f"Invalid format '{item}'. Expected KEY=VALUE (e.g. Application.GVL.myVar=123)", file=sys.stderr)
+            sys.exit(1)
+    r = send_request(args.host, args.port, {"action": "online_write", "values": val_dict, "force": args.force})
+    print(json.dumps(r, indent=2, ensure_ascii=False))
+
+def cmd_export_xml(args):
+    req = {"action": "export_xml"}
+    if args.out:
+        req["path"] = os.path.abspath(args.out)
+    r = send_request(args.host, args.port, req, timeout=60.0)
+    if args.out:
+        print(json.dumps(r, indent=2, ensure_ascii=False))
+    else:
+        if r.get("status") == "ok" and "xml" in r:
+            print(r["xml"])
+        else:
+            print(json.dumps(r, indent=2, ensure_ascii=False))
+
+def cmd_import_xml(args):
+    file_path = os.path.abspath(args.file)
+    if not os.path.exists(file_path):
+        print(f"File not found: {file_path}", file=sys.stderr)
+        sys.exit(1)
+    r = send_request(args.host, args.port, {"action": "import_xml", "path": file_path}, timeout=60.0)
+    print(json.dumps(r, indent=2, ensure_ascii=False))
+
 # ------------------------------------------------------------------------------
 # Точка входа CLI
 # ------------------------------------------------------------------------------
@@ -195,6 +280,9 @@ def main():
     p_comp = sub.add_parser("compile", help="Compile project")
     p_comp.add_argument("--clean", action="store_true", help="Perform Clean before Build")
 
+    # inspect-tree
+    sub.add_parser("inspect-tree", help="Inspect project Application POUs and Hardware tree")
+
     # exec
     p_exec = sub.add_parser("exec", help="Execute Python code on IDE ScriptEngine")
     p_exec.add_argument("code", help="Code string or path to .py file")
@@ -213,16 +301,56 @@ def main():
     p_imp = sub.add_parser("import", help="Import ST sources into project")
     p_imp.add_argument("--src", required=True, help="Source folder with .st files")
 
+    # online-status
+    sub.add_parser("online-status", help="Check PLC online connection and RUN/STOP state")
+
+    # online-login
+    p_login = sub.add_parser("online-login", help="Connect (Login) to PLC")
+    p_login.add_argument("--change-option", default="Try", choices=["Try", "Never", "Force", "Keep"], help="Online change option")
+
+    # online-logout
+    sub.add_parser("online-logout", help="Disconnect (Logout) from PLC")
+
+    # online-control
+    p_ctrl = sub.add_parser("online-control", help="Control PLC execution state")
+    p_ctrl.add_argument("command", choices=["start", "stop", "reset_warm", "reset_cold"], help="Control command")
+
+    # online-read
+    p_read = sub.add_parser("online-read", help="Read PLC variable values in real-time")
+    p_read.add_argument("--vars", nargs="+", required=True, help="Expressions to read (e.g. Application.PLC_PRG.iCounter)")
+
+    # online-write
+    p_write = sub.add_parser("online-write", help="Write or Force PLC variable values")
+    p_write.add_argument("--vars", nargs="+", required=True, help="Assignments in format VAR=VALUE")
+    p_write.add_argument("--force", action="store_true", help="Force value instead of regular write")
+
+    # export-xml
+    p_expxml = sub.add_parser("export-xml", help="Export application to standard PLCopen XML")
+    p_expxml.add_argument("--out", help="Optional output XML file path. If omitted, prints XML to stdout.")
+
+    # import-xml
+    p_impxml = sub.add_parser("import-xml", help="Import PLCopen XML into active project")
+    p_impxml.add_argument("--file", required=True, help="Path to PLCopen XML file to import")
+
     args = parser.parse_args()
 
     cmd_map = {
         "status": cmd_status,
         "save": cmd_save,
         "compile": cmd_compile,
+        "inspect-tree": cmd_inspect_tree,
         "exec": cmd_exec,
         "map-io": cmd_map_io,
         "export": cmd_export,
         "import": cmd_import,
+        "online-status": cmd_online_status,
+        "online-login": cmd_online_login,
+        "online-logout": cmd_online_logout,
+        "online-control": cmd_online_control,
+        "online-read": cmd_online_read,
+        "online-write": cmd_online_write,
+        "export-xml": cmd_export_xml,
+        "import-xml": cmd_import_xml,
     }
 
     handler = cmd_map.get(args.cmd)
