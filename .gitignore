@@ -1,0 +1,22 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs and databases
+*.log
+*.sqlite
+
+# Environment variables & secrets
+.env
+.env.*
+
+# Local IDE & editor caches
+.vscode/
+.idea/
+*.swp
+*~
+
+# Temporary IPC files
+codesys_ipc_req.json
+codesys_ipc_resp.json
