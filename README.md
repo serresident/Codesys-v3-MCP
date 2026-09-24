@@ -131,6 +131,7 @@ python client/abak_bridge_client.py --host 192.168.1.100 online-status
 │       ├── 04_online_monitoring.py# Чтение и запись переменных ПЛК онлайн
 │       └── inspect_live_mapping.py# Инспекция текущих привязок модуля и GVL
 └── docs/                          # Подробная техническая документация
+    ├── CAPABILITIES_AND_ROADMAP.md# Текущие возможности и дорожная карта развития
     ├── DEPLOYMENT_GUIDE.md        # Пошаговое руководство по развертыванию на других ПК
     ├── ARCHITECTURE.md            # Устройство сервера, потоковая модель, ScriptEngine
     ├── API_REFERENCE.md           # Спецификация 15 эндпоинтов сетевого протокола
