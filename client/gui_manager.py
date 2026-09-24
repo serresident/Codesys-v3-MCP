@@ -795,21 +795,38 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def launch_ide_only(self):
         proj_path = self.txt_project_path.text().strip()
-        resolved_proj = self.resolve_project_path(proj_path)
-        if not os.path.exists(resolved_proj):
-            QtWidgets.QMessageBox.warning(self, "Ошибка", f"Файл проекта не найден:\n{resolved_proj}")
+        resolved_proj = self.resolve_project_path(proj_path) if proj_path else ""
+        
+        possible_exes = [
+            r"C:\Program Files (x86)\Abak.IDE.1.0.0\CODESYS\Common\abak.ide.exe",
+            r"C:\Program Files\CODESYS 3.5.21.0\CODESYS\Common\CODESYS.exe",
+            r"C:\Program Files\CODESYS 3.5.19.0\CODESYS\Common\CODESYS.exe",
+            r"C:\Program Files (x86)\3S CODESYS\CODESYS\Common\CODESYS.exe"
+        ]
+        ide_exe = None
+        for p in possible_exes:
+            if os.path.exists(p):
+                ide_exe = p
+                break
+                
+        if not ide_exe:
+            QtWidgets.QMessageBox.warning(self, "Ошибка", "Исполняемый файл Abak.IDE / CODESYS не найден по стандартным путям.")
             return
-            
-        ide_exe = r"C:\Program Files (x86)\Abak.IDE.1.0.0\CODESYS\Common\abak.ide.exe"
-        if not os.path.exists(ide_exe):
-            QtWidgets.QMessageBox.warning(self, "Ошибка", f"Исполняемый файл Abak.IDE не найден по пути:\n{ide_exe}")
-            return
-            
-        profile = "Abak.IDE V1.0.0.0"
-        cmd = f'start "" "{ide_exe}" --profile="{profile}" "{resolved_proj}"'
+
+        profile = "Abak.IDE V1.0.0.0" if "abak" in ide_exe.lower() else ""
+        server_script = os.path.normpath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server", "codesys_bridge_server.py"))
+        
+        cmd_parts = [f'start "" "{ide_exe}"']
+        if profile:
+            cmd_parts.append(f'--profile="{profile}"')
+        if resolved_proj and os.path.exists(resolved_proj):
+            cmd_parts.append(f'"{resolved_proj}"')
+        cmd_parts.append(f'--runscript="{server_script}"')
+        
+        cmd = " ".join(cmd_parts)
         try:
             subprocess.Popen(cmd, shell=True)
-            self.write_log(f"<span style='color:#00f0ff;'>Запуск Abak.IDE с проектом...</span>\nКоманда: {cmd}")
+            self.write_log(f"<span style='color:#00f0ff;'>Запуск среды с автоматическим стартом моста...</span>\nКоманда: {cmd}")
         except Exception as e:
             self.write_log(f"<span style='color:#ef4444;'>Ошибка запуска: {e}</span>")
 

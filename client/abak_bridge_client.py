@@ -66,6 +66,71 @@ def cmd_status(args):
     r = send_request(args.host, args.port, {"action": "status"})
     print(json.dumps(r, indent=2, ensure_ascii=False))
 
+def cmd_launch(args):
+    """
+    Автоматический запуск Abak.IDE / CODESYS вместе со скриптом моста и проектом.
+    """
+    host = args.host
+    port = args.port
+
+    # 1. Проверяем, запущен ли уже мост
+    try:
+        r = send_request(host, port, {"action": "status"}, timeout=1.5)
+        if r.get("status") == "ok":
+            print(f"✓ Мост уже активен и отвечает на {host}:{port}")
+            print(f"  Проект: {r.get('project_path', 'Не открыт')}")
+            return
+    except Exception:
+        pass
+
+    # 2. Поиск исполняемого файла
+    possible_exes = [
+        r"C:\Program Files (x86)\Abak.IDE.1.0.0\CODESYS\Common\abak.ide.exe",
+        r"C:\Program Files\CODESYS 3.5.21.0\CODESYS\Common\CODESYS.exe",
+        r"C:\Program Files\CODESYS 3.5.19.0\CODESYS\Common\CODESYS.exe",
+        r"C:\Program Files (x86)\3S CODESYS\CODESYS\Common\CODESYS.exe"
+    ]
+    ide_exe = getattr(args, "ide_exe", None) or os.environ.get("ABAK_IDE_EXE")
+    if not ide_exe:
+        for p in possible_exes:
+            if os.path.exists(p):
+                ide_exe = p
+                break
+
+    if not ide_exe or not os.path.exists(ide_exe):
+        print("Ошибка: Исполняемый файл Abak.IDE / CODESYS не найден.", file=sys.stderr)
+        print("Укажите путь через --ide-exe или переменную окружения ABAK_IDE_EXE", file=sys.stderr)
+        sys.exit(1)
+
+    profile = getattr(args, "profile", None) or ("Abak.IDE V1.0.0.0" if "abak" in ide_exe.lower() else "")
+    script_path = os.path.normpath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server", "codesys_bridge_server.py"))
+
+    cmd_parts = [f'start "" "{ide_exe}"']
+    if profile:
+        cmd_parts.append(f'--profile="{profile}"')
+    if getattr(args, "project", None) and os.path.exists(args.project):
+        cmd_parts.append(f'"{os.path.abspath(args.project)}"')
+    cmd_parts.append(f'--runscript="{script_path}"')
+
+    full_cmd = " ".join(cmd_parts)
+    print(f"Запуск среды: {full_cmd}")
+    subprocess.Popen(full_cmd, shell=True)
+
+    # 3. Ожидание запуска моста
+    print(f"Ожидание ответа моста на {host}:{port}...", end="", flush=True)
+    for _ in range(25):
+        time.sleep(1.0)
+        print(".", end="", flush=True)
+        try:
+            r = send_request(host, port, {"action": "status"}, timeout=1.0)
+            if r.get("status") == "ok":
+                print(f"\n✓ Мост успешно запущен и готов к работе на {host}:{port}!")
+                print(f"  Проект: {r.get('project_path', 'Не открыт')}")
+                return
+        except Exception:
+            pass
+    print(f"\n[!] Внимание: Превышено время ожидания ответа моста (25 с). Проверьте окно Abak.IDE.")
+
 def cmd_save(args):
     r = send_request(args.host, args.port, {"action": "save"})
     print(r.get("message", json.dumps(r)))
@@ -348,10 +413,17 @@ def main():
     p_impxml = sub.add_parser("import-xml", help="Import PLCopen XML into active project")
     p_impxml.add_argument("--file", required=True, help="Path to PLCopen XML file to import")
 
+    # launch
+    p_launch = sub.add_parser("launch", help="Auto-launch Abak.IDE / CODESYS with bridge server and project")
+    p_launch.add_argument("--project", help="Path to .project file to open")
+    p_launch.add_argument("--ide-exe", help="Custom path to abak.ide.exe / codesys.exe")
+    p_launch.add_argument("--profile", help="Custom profile name (default: 'Abak.IDE V1.0.0.0')")
+
     args = parser.parse_args()
 
     cmd_map = {
         "status": cmd_status,
+        "launch": cmd_launch,
         "save": cmd_save,
         "compile": cmd_compile,
         "inspect-tree": cmd_inspect_tree,
