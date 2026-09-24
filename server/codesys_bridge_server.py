@@ -481,12 +481,13 @@ def action_export_xml(req):
     app = apps[0]
 
     target_path = req.get("path")
+    plaintext = req.get("declarations_as_plaintext", True)
     try:
         if target_path:
-            proj.export_xml([app], path=target_path, recursive=True, export_folder_structure=True)
+            proj.export_xml([app], path=target_path, recursive=True, export_folder_structure=True, declarations_as_plaintext=plaintext)
             return {"status": "ok", "path": target_path}
         else:
-            xml_str = proj.export_xml([app], recursive=True, export_folder_structure=True)
+            xml_str = proj.export_xml([app], recursive=True, export_folder_structure=True, declarations_as_plaintext=plaintext)
             return {"status": "ok", "xml": xml_str}
     except Exception as ex:
         return {"status": "error", "message": str(ex)}
