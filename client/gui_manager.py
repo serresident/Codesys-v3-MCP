@@ -228,35 +228,16 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 }
 """
 
+# Обеспечиваем доступ к пакету common при запуске GUI
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
+from common.transport import BridgeTransport, send_request as unified_send_request
+
 def send_tcp_request(host, port, req_data, timeout=15.0):
-    body = json.dumps(req_data, ensure_ascii=False).encode("utf-8")
-    header = (
-        f"POST /api HTTP/1.1\r\n"
-        f"Host: {host}:{port}\r\n"
-        f"Content-Type: application/json; charset=utf-8\r\n"
-        f"Content-Length: {len(body)}\r\n"
-        f"Connection: close\r\n\r\n"
-    ).encode("utf-8")
-
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(timeout)
-    try:
-        s.connect((host, port))
-        s.sendall(header + body)
-
-        resp_bytes = bytearray()
-        while True:
-            chunk = s.recv(4096)
-            if not chunk:
-                break
-            resp_bytes.extend(chunk)
-
-        sep = b"\r\n\r\n"
-        idx = resp_bytes.find(sep)
-        body_data = resp_bytes[idx + len(sep):] if idx != -1 else resp_bytes
-        return json.loads(body_data.decode("utf-8", errors="replace"))
-    finally:
-        s.close()
+    transport = BridgeTransport(host=host, default_port=port)
+    return transport.send_request(req_data, port=port, timeout=timeout)
 
 
 class NetworkWorker(QtCore.QThread):

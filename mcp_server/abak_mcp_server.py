@@ -22,69 +22,12 @@ from mcp.server.mcpserver import MCPServer
 # Initialize MCP Server
 app = MCPServer("abak-ide-bridge")
 
-DEFAULT_HOST = os.environ.get("ABAK_BRIDGE_HOST", "127.0.0.1")
-DEFAULT_PORT = int(os.environ.get("ABAK_BRIDGE_PORT", "11888"))
+# Обеспечиваем доступ к пакету common при запуске MCP сервера
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 
-_cached_port = None
-
-def _connect_with_fallback(host, initial_port, timeout):
-    global _cached_port
-    ports_to_try = [initial_port]
-    if _cached_port and _cached_port not in ports_to_try:
-        ports_to_try.insert(0, _cached_port)
-    for p in [11888, 11889, 11890, 11891, 12888]:
-        if p not in ports_to_try:
-            ports_to_try.append(p)
-            
-    for p in ports_to_try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        try:
-            s.connect((host, p))
-            if _cached_port != p:
-                _cached_port = p
-            return s, p
-        except Exception:
-            s.close()
-    raise ConnectionError(f"Could not connect to any CODESYS Bridge port on {host}")
-
-def send_tcp_request(host: str, port: int, payload: dict, timeout: float = 30.0) -> dict:
-    """Send JSON-RPC/dict payload to CODESYS Bridge server and return parsed response."""
-    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    s, active_port = _connect_with_fallback(host, port, timeout)
-    
-    # Send as HTTP POST since the server expects HTTP
-    header = (
-        f"POST /api HTTP/1.1\r\n"
-        f"Host: {host}:{active_port}\r\n"
-        f"Content-Type: application/json; charset=utf-8\r\n"
-        f"Content-Length: {len(data)}\r\n"
-        f"Connection: close\r\n\r\n"
-    ).encode("utf-8")
-    
-    try:
-        s.sendall(header + data)
-        chunks = []
-        while True:
-            try:
-                chunk = s.recv(16384)
-                if not chunk: break
-                chunks.append(chunk)
-            except socket.timeout:
-                break
-    finally:
-        s.close()
-    
-    resp_bytes = b"".join(chunks)
-    try:
-        header_end = resp_bytes.find(b"\r\n\r\n")
-        if header_end != -1:
-            body_bytes = resp_bytes[header_end+4:]
-        else:
-            body_bytes = resp_bytes
-        return json.loads(body_bytes.decode("utf-8", errors="replace"))
-    except Exception as e:
-        return {"success": False, "error": "Decode error: " + str(e), "raw": resp_bytes.decode("utf-8", errors="replace")}
+from common.transport import BridgeTransport, send_tcp_request, DEFAULT_HOST, DEFAULT_PORT
 
 
 @app.tool()
@@ -229,6 +172,10 @@ def abak_save_project(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dic
 def abak_exec_python(code: str = "", script_path: str = "", params: Optional[Dict[str, Any]] = None, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dict[str, Any]:
     """Execute arbitrary Python 2.7 / IronPython code directly inside CODESYS / Abak.IDE ScriptEngine.
     
+    Best Practice Recommendation:
+      - Recommended for inspecting hardware device trees, configuring device parameters, Modbus channels, or running automation scripts.
+      - For creating or modifying POU, GVL, or DUT program logic, prefer `abak_import_plcopen_xml` / `abak_export_plcopen_xml` to avoid textual AST replace caching desyncs in IDE tabs.
+    
     The script has access to:
       - `projects.primary` / `active_project` (Active project)
       - `system` (CODESYS System API)
@@ -353,6 +300,10 @@ def abak_export_plcopen_xml(file_path: Optional[str] = None, host: str = DEFAULT
 @app.tool()
 def abak_import_plcopen_xml(file_path: str, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Dict[str, Any]:
     """Import PLCopen XML file into active project in Abak.IDE.
+    
+    Best Practice Recommendation:
+      - Recommended Gold Standard for updating or adding POUs, GVLs, and DUTs into the active project.
+      - Preserves AST formatting, declarations, and types cleanly without editor tab desynchronization.
     
     Args:
         file_path: Full file path to the PLCopen XML file on the engineering station.

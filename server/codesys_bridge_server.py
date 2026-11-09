@@ -24,14 +24,16 @@ import traceback
 
 import System
 import clr
-try:
-    clr.AddReference("System")
-except:
-    pass
-try:
-    clr.AddReference("System.Windows.Forms")
-except:
-    pass
+
+# Информативная загрузка сборок CLR для IronPython 2.7
+def _init_clr_assemblies():
+    for asm in ["System", "System.Windows.Forms", "System.Xml"]:
+        try:
+            clr.AddReference(asm)
+        except Exception as ex:
+            print("[WARN] Could not pre-load CLR assembly '%s': %s" % (asm, ex))
+
+_init_clr_assemblies()
 
 from System import Array, Byte, Int32
 from System.IO import File, FileInfo, Directory, Path, MemoryStream
@@ -42,7 +44,7 @@ from System.Net.Sockets import TcpListener, SocketException
 # ------------------------------------------------------------------------------
 # Конфигурация сервера
 # ------------------------------------------------------------------------------
-TCP_PORTS = [11888, 11889, 11890, 12888]
+TCP_PORTS = [11888, 11889, 11890, 11891, 12888]
 TIMER_INTERVAL_MS = 100
 IPC_REQ_FILE = os.path.join(System.IO.Path.GetTempPath(), "codesys_ipc_req.json")
 IPC_RESP_FILE = os.path.join(System.IO.Path.GetTempPath(), "codesys_ipc_resp.json")
