@@ -25,40 +25,66 @@ app = MCPServer("abak-ide-bridge")
 DEFAULT_HOST = os.environ.get("ABAK_BRIDGE_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("ABAK_BRIDGE_PORT", "11888"))
 
+_cached_port = None
+
+def _connect_with_fallback(host, initial_port, timeout):
+    global _cached_port
+    ports_to_try = [initial_port]
+    if _cached_port and _cached_port not in ports_to_try:
+        ports_to_try.insert(0, _cached_port)
+    for p in [11888, 11889, 11890, 11891, 12888]:
+        if p not in ports_to_try:
+            ports_to_try.append(p)
+            
+    for p in ports_to_try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        try:
+            s.connect((host, p))
+            if _cached_port != p:
+                _cached_port = p
+            return s, p
+        except Exception:
+            s.close()
+    raise ConnectionError(f"Could not connect to any CODESYS Bridge port on {host}")
+
 def send_tcp_request(host: str, port: int, payload: dict, timeout: float = 30.0) -> dict:
     """Send JSON-RPC/dict payload to CODESYS Bridge server and return parsed response."""
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(timeout)
+    s, active_port = _connect_with_fallback(host, port, timeout)
+    
+    # Send as HTTP POST since the server expects HTTP
+    header = (
+        f"POST /api HTTP/1.1\r\n"
+        f"Host: {host}:{active_port}\r\n"
+        f"Content-Type: application/json; charset=utf-8\r\n"
+        f"Content-Length: {len(data)}\r\n"
+        f"Connection: close\r\n\r\n"
+    ).encode("utf-8")
+    
     try:
-        s.connect((host, port))
-        s.sendall(data)
-        
+        s.sendall(header + data)
         chunks = []
         while True:
             try:
                 chunk = s.recv(16384)
-                if not chunk:
-                    break
+                if not chunk: break
                 chunks.append(chunk)
             except socket.timeout:
                 break
-        
-        raw_res = b"".join(chunks).decode("utf-8", errors="replace").strip()
-        if not raw_res:
-            return {"status": "error", "error": "Empty response from bridge"}
-        
-        # If wrapped in HTTP header (Simple HTTP response)
-        if "\r\n\r\n" in raw_res:
-            raw_res = raw_res.split("\r\n\r\n", 1)[1]
-        elif "\n\n" in raw_res:
-            raw_res = raw_res.split("\n\n", 1)[1]
-            
-        return json.loads(raw_res)
-    except Exception as ex:
-        return {"status": "error", "error": str(ex)}
     finally:
         s.close()
+    
+    resp_bytes = b"".join(chunks)
+    try:
+        header_end = resp_bytes.find(b"\r\n\r\n")
+        if header_end != -1:
+            body_bytes = resp_bytes[header_end+4:]
+        else:
+            body_bytes = resp_bytes
+        return json.loads(body_bytes.decode("utf-8", errors="replace"))
+    except Exception as e:
+        return {"success": False, "error": "Decode error: " + str(e), "raw": resp_bytes.decode("utf-8", errors="replace")}
 
 
 @app.tool()

@@ -23,6 +23,16 @@ import json
 import traceback
 
 import System
+import clr
+try:
+    clr.AddReference("System")
+except:
+    pass
+try:
+    clr.AddReference("System.Windows.Forms")
+except:
+    pass
+
 from System import Array, Byte, Int32
 from System.IO import File, FileInfo, Directory, Path, MemoryStream
 from System.Windows.Forms import Timer, Application

@@ -20,48 +20,64 @@ DEFAULT_HOST = os.environ.get("ABAK_BRIDGE_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("ABAK_BRIDGE_PORT", "11888"))
 TIMEOUT = 15.0
 
+_cached_port = None
+
+def _connect_with_fallback(host, initial_port, timeout):
+    global _cached_port
+    ports_to_try = [initial_port]
+    if _cached_port and _cached_port not in ports_to_try:
+        ports_to_try.insert(0, _cached_port)
+    for p in [11888, 11889, 11890, 11891, 12888]:
+        if p not in ports_to_try:
+            ports_to_try.append(p)
+            
+    import socket
+    for p in ports_to_try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        try:
+            s.connect((host, p))
+            if _cached_port != p:
+                _cached_port = p
+            return s, p
+        except Exception:
+            s.close()
+    raise ConnectionError("Could not connect to any CODESYS Bridge port on " + host)
+
 def send_request(host, port, req_data, timeout=TIMEOUT):
-    """
-    Отправляет JSON запрос на сервер Abak.IDE через прямой TCP-сокет HTTP/1.1.
-    """
+    import json
     body = json.dumps(req_data, ensure_ascii=False).encode("utf-8")
+    
+    s, active_port = _connect_with_fallback(host, port, timeout)
     header = (
         f"POST /api HTTP/1.1\r\n"
-        f"Host: {host}:{port}\r\n"
+        f"Host: {host}:{active_port}\r\n"
         f"Content-Type: application/json; charset=utf-8\r\n"
         f"Content-Length: {len(body)}\r\n"
         f"Connection: close\r\n\r\n"
     ).encode("utf-8")
-
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(timeout)
+    
     try:
-        s.connect((host, port))
         s.sendall(header + body)
-
         resp_bytes = bytearray()
         while True:
-            chunk = s.recv(4096)
-            if not chunk:
-                break
+            chunk = s.recv(16384)
+            if not chunk: break
             resp_bytes.extend(chunk)
-
-        # Разбор ответа HTTP
-        sep = b"\r\n\r\n"
-        idx = resp_bytes.find(sep)
-        if idx != -1:
-            body_data = resp_bytes[idx + len(sep):]
-        else:
-            body_data = resp_bytes
-
-        raw_str = body_data.decode("utf-8", errors="replace")
-        return json.loads(raw_str)
     finally:
         s.close()
+        
+    try:
+        header_end = resp_bytes.find(b"\r\n\r\n")
+        if header_end != -1:
+            body_bytes = resp_bytes[header_end+4:]
+        else:
+            body_bytes = resp_bytes
+        return json.loads(body_bytes.decode("utf-8", errors="replace"))
+    except Exception as e:
+        return {"success": False, "error": "Decode error: " + str(e), "raw": resp_bytes.decode("utf-8", errors="replace")}
 
-# ------------------------------------------------------------------------------
-# Команды CLI
-# ------------------------------------------------------------------------------
+
 def cmd_status(args):
     r = send_request(args.host, args.port, {"action": "status"})
     print(json.dumps(r, indent=2, ensure_ascii=False))
